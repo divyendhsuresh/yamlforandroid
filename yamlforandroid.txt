@@ -1,0 +1,74 @@
+# Node.js
+# Build a general Node.js project with npm.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- android
+
+variables:
+  projectName: 'SampleApp'
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '14.x'
+
+- task: Npm@1
+  inputs:
+    command: install
+  displayName: 'NPM Install'
+
+- script: npm install -g @ionic/cli
+  displayName: 'Install Ionic CLI'
+
+- script: npm install -g @angular/cli
+  displayName: 'Angular Install'
+- task: JavaToolInstaller@0
+  inputs:
+    versionSpec: '11'
+    jdkArchitectureOption: 'x64'
+    jdkSourceOption: 'PreInstalled'
+
+- powershell: |
+    ionic capacitor build android --no-open
+    npx cap sync
+    cd android
+    ./gradlew clean
+    ./gradlew bundleRelease
+  displayName: 'Build Android Project'
+- task: DownloadSecureFile@1
+  name: signer
+  inputs:
+    secureFile: "lotto-test.jks"
+- bash: |
+    jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore "$(signer.secureFilePath)" -storepass divyendh -keypass divyendh "$(Build.SourcesDirectory)\android\app\build\outputs\bundle\release\app-release.aab" key0
+# - task: AndroidSigning@3
+#   inputs:
+#     apkFiles: '$(Build.SourcesDirectory)/android/app/build/outputs/apk/debug/app-debug.apk'
+#     apksignerKeystoreFile: 'divyendh.jks'
+#     apksignerKeystorePassword: 'divyendh'
+#     apksignerKeystoreAlias: 'deepu'
+#     apksignerKeyPassword: 'divyendh'
+# here sign an debug apk by mistake sign is only for release apk so correct it when uncomment the code
+# - task: CopyFiles@2
+#   inputs:
+#     SourceFolder: '$(Build.SourcesDirectory)/android/app/build/outputs/bundle/debug'
+#     contents: "**/app-debug.aab"
+#     targetFolder: "$(Build.ArtifactStagingDirectory)"
+#   displayName: "Copy debug APK to staging directory"
+- task: CopyFiles@2
+  inputs:
+    SourceFolder: '$(Build.SourcesDirectory)/android/app/build/outputs/bundle/release'
+    contents: "**/app-release.aab"
+    targetFolder: "$(Build.ArtifactStagingDirectory)"
+  displayName: "Copy debug APK to staging directory"
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: "$(Build.ArtifactStagingDirectory)"
+    ArtifactName: "Bundle-Release-Debug"
+    publishLocation: "Container"
+  displayName: "Publish artifacts"
