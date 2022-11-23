@@ -1,0 +1,147 @@
+
+trigger:
+  branches:
+    include:
+      - master
+      - develop
+    exclude:
+      - feature/*
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: Build
+  variables:
+  - group: passwords
+  displayName: Build aab file
+  jobs:
+  - job: Build
+    displayName: Build
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '14.x'
+    - task: Npm@1
+      inputs:
+        command: install
+      displayName: 'NPM Install'
+
+    - script: npm install -g @ionic/cli
+      displayName: 'Install Ionic CLI'
+
+    - script: npm install -g @angular/cli
+      displayName: 'Angular Install'
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+
+    - powershell: |
+        ionic capacitor build android --no-open
+        npx cap sync
+        cd android
+        ./gradlew clean
+        ./gradlew bundleRelease
+      displayName: 'Build Android Project'
+    - task: DownloadSecureFile@1
+      name: signer
+      inputs:
+        secureFile: "lotto-test.jks"
+    - bash: |
+        jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore "$(signer.secureFilePath)" -storepass $(store.pass) -keypass $(key.pass) "$(Build.SourcesDirectory)\android\app\build\outputs\bundle\release\app-release.aab" $(key.alias)
+      displayName: 'Signing aab bundle'
+    - task: CopyFiles@2
+      inputs:
+          SourceFolder: '$(Build.SourcesDirectory)/android/app/build/outputs/bundle/release'
+          contents: "**/app-release.aab"
+          targetFolder: "$(Build.ArtifactStagingDirectory)"
+      displayName: "Copy Release AAB to staging directory"
+    - task: PublishBuildArtifacts@1
+      inputs:
+          PathtoPublish: "$(Build.ArtifactStagingDirectory)"
+          publishLocation: 'Container'
+      displayName: "Publish artifacts"
+
+- stage: Deploy
+  dependsOn: Build
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+  displayName: Deploy 
+  jobs:
+  - deployment: 'DeployToGPC'#JOB is deployment so artifact will be automatically downloaded in this stage
+    environment: 'Deploy'
+    strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: PowerShell@2
+              inputs:
+                targetType: 'inline'
+                script: |
+                  $File = 'D:\a\1\drop\app-release.aab'
+                  "Test to see if File [$File] exists"
+                  if (Test-Path -Path $File) {
+                    echo "Yes"
+                  } else {
+                    echo "No"
+                  }
+              displayName: 'Checking AAB File' 
+              # - task: CopyFiles@2
+              #   inputs:
+              #     SourceFolder: '$(Pipeline.Workspace)/drop'
+              #     contents: "**/app-release.aab"
+              #     targetFolder: "$(Build.ArtifactStagingDirectory)"
+              #   displayName: "Copy Release AAB to staging directory"
+              # - task: UniversalPackages@0
+              #   inputs:
+              #     command: 'publish'
+              #     publishDirectory: '$(Build.ArtifactStagingDirectory)'
+              #     feedsToUsePublish: 'internal'
+              #     vstsFeedPublish: 'f3bde576-940d-40f2-929e-8c698353b0f5/9f58f66b-8f8e-410c-b138-317f0fde8c97'
+              #     vstsFeedPackagePublish: 'my-first-package'
+              #     versionOption: 'major'
+              #   displayName: 'Publishing to Azure Artifact Service'
+            #   - task: PublishBuildArtifacts@1
+            #   inputs:
+            #     PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            #     ArtifactName: 'drop-2'
+            #     publishLocation: 'Container'
+            # - task: DownloadBuildArtifacts@1
+            #   inputs:
+            #     buildType: 'specific'
+            #     project: 'f3bde576-940d-40f2-929e-8c698353b0f5'
+            #     pipeline: '79'
+            #     buildVersionToDownload: 'latest'
+            #     downloadType: 'single'
+            #     artifactName: 'app-release.aab'
+            #     downloadPath: '$(System.ArtifactsDirectory)'
+            # - task: GooglePlayRelease@4
+            #   displayName: 'Release aab File'
+            #   inputs:
+            #     serviceConnection: "bytestrone-google-play-store-sc"
+            #     applicationId: "io.ionic.demo.pg.cap.ng"
+            #     action: "SingleBundle"
+            #     bundleFile: "$(Pipeline.Workspace/drop/app-release.aab"
+            #     track: "internal"
+            #     releaseName: "Rest"
+# - stage: Release
+#   dependsOn: Build
+#   condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+#   displayName: Release 
+#   jobs:
+#   - deployment: 'ReleaseToGP'
+#     environment: 'Release'
+#     strategy:
+#         runOnce:
+#           deploy:
+#             steps:
+#             - task: GooglePlayRelease@4
+#               inputs:
+#                 serviceConnection: 'bytestrone-google-play-store-sc'
+#                 applicationId: "io.ionic.demo.pg.cap.ng"
+#                 action: 'SingleBundle'
+#                 bundleFile: "$(Pipeline.Workspace/drop/app-release.aab"
+#                 track: 'production'
+#                 releaseName: "Release"
+            
